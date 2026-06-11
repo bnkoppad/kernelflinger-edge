@@ -109,13 +109,13 @@ EFI_STATUS parse_rpmb_key_from_boot_param(IN VOID * boot_param)
 						efi_perror(ret, L"RpmbSeedInfo is NULL");
 						return ret;
 					}
-					if (num_rpmb_key < RPMB_MAX_PARTITION_NUMBER + 1) {
+					if (num_rpmb_key < RPMB_MAX_PARTITION_NUMBER) {
 						ret = memcpy_s(rpmb_key[num_rpmb_key], sizeof(rpmb_key), RpmbSeedInfo,
 									   RPMB_KEY_SIZE);
 						if (EFI_ERROR(ret))
 							return ret;
+						num_rpmb_key++;
 					}
-					num_rpmb_key++;
 					memset_s(RpmbSeedInfo, RPMB_KEY_SIZE, 0x0, RPMB_KEY_SIZE);
 				}
 				debug(L"Increment SeedEntryData Pointer to point to next seed entry");
