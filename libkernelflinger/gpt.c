@@ -168,14 +168,39 @@ static EFI_STATUS read_gpt_partitions(struct gpt_disk *disk)
 	UINTN offset;
 	UINTN size;
 	UINT32 crc;
+	UINTN entries;
+	UINTN entry_size;
+
+	/* Validate size_of_entry against GPT specification (must be exactly 128 bytes) */
+	if (disk->gpt_hd.size_of_entry != GPT_ENTRY_SIZE) {
+		error(L"Invalid GPT entry size: %d (expected %d)",
+		      disk->gpt_hd.size_of_entry, GPT_ENTRY_SIZE);
+		return EFI_UNSUPPORTED;
+	}
 
 	if (disk->gpt_hd.number_of_entries > GPT_ENTRIES) {
 		error(L"Maximum number of partition supported is %d", GPT_ENTRIES);
 		return EFI_UNSUPPORTED;
 	}
 
+	/* Check for integer overflow in multiplication before computing size */
+	entries = disk->gpt_hd.number_of_entries;
+	entry_size = disk->gpt_hd.size_of_entry;
+
+	if (entries > 0 && entry_size > (~(UINTN)0) / entries) {
+		error(L"Integer overflow in GPT size calculation: %d * %d", entries, entry_size);
+		return EFI_UNSUPPORTED;
+	}
+
 	offset = disk->bio->Media->BlockSize * disk->gpt_hd.entries_lba;
-	size = ((UINTN)disk->gpt_hd.number_of_entries) * disk->gpt_hd.size_of_entry;
+	size = entries * entry_size;
+
+	/* Ensure total size does not exceed buffer capacity */
+	if (size > sizeof(disk->partitions)) {
+		error(L"GPT entries array size (%d) exceeds buffer capacity (%d)",
+		      size, sizeof(disk->partitions));
+		return EFI_BUFFER_TOO_SMALL;
+	}
 
 	ret = uefi_call_wrapper(disk->dio->ReadDisk, 5, disk->dio, disk->bio->Media->MediaId, disk->dio_offset + offset, size, disk->partitions);
 	if (EFI_ERROR(ret)) {
