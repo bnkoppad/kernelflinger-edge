@@ -272,6 +272,12 @@ static enum boot_target check_bcb(CHAR16 **target_path, BOOLEAN *oneshot)
 			goto out;
 		}
 
+		if (device_is_locked()) {
+			error(L"BCB ESP boot not allowed on locked device");
+			t = NORMAL_BOOT;
+			goto out;
+		}
+
 		len = StrLen(target);
 		if (len > 4) {
 			*target_path = StrDuplicate(target);
@@ -1104,6 +1110,8 @@ static EFI_STATUS avb_load_verify_boot_image(
 		/* "fastboot boot" case */
 		ret = android_image_load_file(g_disk_device, target_path, oneshot,
 			bootimage);
+		if (!EFI_ERROR(ret) && boot_state)
+			*boot_state = BOOT_STATE_ORANGE;
 		break;
 	default:
 		*bootimage = NULL;
