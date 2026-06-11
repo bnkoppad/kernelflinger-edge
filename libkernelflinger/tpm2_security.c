@@ -779,10 +779,31 @@ EFI_STATUS read_rollback_index_tpm2(size_t rollback_index_slot, uint64_t *out_ro
 EFI_STATUS write_rollback_index_tpm2(size_t rollback_index_slot, uint64_t rollback_index)
 {
 	EFI_STATUS ret;
+	uint64_t current_value = 0;
 
 	if (rollback_index_slot >= ARRAY_SIZE(((tpm2_bootloader_t *)0)->rollback_index)) {
 		error(L"The rollback index slot is too large to write into TPM: %d", rollback_index_slot);
 		return EFI_INVALID_PARAMETER;
+	}
+
+	/* Enforce monotonicity: only allow increases, never downgrades */
+	ret = read_rollback_index_tpm2(rollback_index_slot, &current_value);
+	if (EFI_ERROR(ret)) {
+		efi_perror(ret, L"Failed to read current rollback index for monotonicity check, slot: %d",
+				rollback_index_slot);
+		return ret;
+	}
+
+	if (rollback_index < current_value) {
+		error(L"Rollback index downgrade blocked: slot %d, current=0x%llx, attempted=0x%llx",
+		      rollback_index_slot, current_value, rollback_index);
+		return EFI_SECURITY_VIOLATION;
+	}
+
+	if (rollback_index == current_value) {
+		debug(L"Rollback index unchanged, skipping write: slot %d, value=0x%llx",
+		      rollback_index_slot, rollback_index);
+		return EFI_SUCCESS;
 	}
 
 	ret = tpm2_write_nvindex(NV_INDEX_BOOTLOADER, sizeof(uint64_t), (BYTE *)&rollback_index,
@@ -952,6 +973,29 @@ EFI_STATUS tee_read_rollback_index_tpm2(size_t rollback_index_slot, uint64_t *ou
 
 EFI_STATUS tee_write_rollback_index_tpm2(size_t rollback_index_slot, uint64_t rollback_index)
 {
+	EFI_STATUS ret;
+	uint64_t current_value = 0;
+
+	/* Enforce monotonicity: only allow increases, never downgrades */
+	ret = tee_read_rollback_index_tpm2(rollback_index_slot, &current_value);
+	if (EFI_ERROR(ret)) {
+		efi_perror(ret, L"Failed to read current rollback index for monotonicity check, slot: %d",
+				rollback_index_slot);
+		return ret;
+	}
+
+	if (rollback_index < current_value) {
+		error(L"Rollback index downgrade blocked: slot %d, current=0x%llx, attempted=0x%llx",
+		      rollback_index_slot, current_value, rollback_index);
+		return EFI_SECURITY_VIOLATION;
+	}
+
+	if (rollback_index == current_value) {
+		debug(L"Rollback index unchanged, skipping write: slot %d, value=0x%llx",
+		      rollback_index_slot, rollback_index);
+		return EFI_SUCCESS;
+	}
+
 	uint32_t payload_len = sizeof(rollback_index_slot) + sizeof(rollback_index);
 	struct tpm2_int_req *req = (struct tpm2_int_req *)AllocateZeroPool(sizeof(struct tpm2_int_req) + payload_len);
 	if (!req)
@@ -962,7 +1006,7 @@ EFI_STATUS tee_write_rollback_index_tpm2(size_t rollback_index_slot, uint64_t ro
 
 	ivshmem_rollback_index_interrupt(req);
 
-	EFI_STATUS ret = req->ret;
+	ret = req->ret;
 	FreePool(req);
 
 	if (EFI_ERROR(ret)) {
